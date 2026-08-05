@@ -1439,14 +1439,41 @@ async function loadBalance() {
 }
 function refreshWalletUI() {
   if (!WEB3.account) { setWalletLine("Wallet not connected"); idlePlayLabel(); return; }
-  var line = "🔗 " + shortAddr(WEB3.account);
+  var line = "Connected: <b>" + shortAddr(WEB3.account) + "</b>";
   if (WEB3.balance !== null) {
     line += " · " + fmtUnits(WEB3.balance, WEB3.decimals) + " $" + WEB3.symbol;
     var need = BigInt(WEB3.costWhole) * (BigInt(10) ** BigInt(WEB3.decimals));
     if (WEB3.balance < need) line += " — <b style='color:#ff6b6b'>not enough to play (need " + WEB3.costWhole.toLocaleString("en-US") + ")</b>";
   }
+  line += " · <a href='#' id='switchWallet'>⇄ switch wallet</a>";
   setWalletLine(line);
+  var sw = document.getElementById("switchWallet");
+  if (sw) sw.onclick = function (e) { e.preventDefault(); switchWallet(); };
   idlePlayLabel();
+}
+
+function attachWalletListeners() {
+  var eth = ethProvider();
+  if (!eth || !eth.on || WEB3.listening) return;
+  WEB3.listening = true;
+  eth.on("accountsChanged", function (a) {
+    WEB3.account = a && a[0] ? a[0] : null;
+    WEB3.balance = null;
+    if (WEB3.account) loadBalance(); else refreshWalletUI();
+  });
+  eth.on("chainChanged", function () { if (WEB3.account) loadToken(); });
+}
+
+async function switchWallet() {
+  var eth = ethProvider(); if (!eth) return;
+  try {
+    // forces MetaMask to show the account picker
+    await eth.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+    var accs = await eth.request({ method: "eth_accounts" });
+    WEB3.account = accs && accs[0] ? accs[0] : null;
+    if (WEB3.account) { setWalletLine("Loading token info…"); await loadToken(); }
+    else refreshWalletUI();
+  } catch (e) { setWalletLine("⚠️ " + friendlyErr(e)); }
 }
 
 async function connectWallet() {
@@ -1468,7 +1495,7 @@ async function connectWallet() {
   }
   setWalletLine("Loading token info…");
   await loadToken();
-  eth.on && eth.on("accountsChanged", function (a) { WEB3.account = a && a[0]; refreshWalletUI(); });
+  attachWalletListeners();
   return true;
 }
 
@@ -1497,6 +1524,13 @@ async function payAndPlay() {
       return;              // first click connects; second click pays (no surprise txs)
     }
     setPlayLabel("CONFIRM IN WALLET…");
+    // re-sync with the wallet's CURRENT account so 'from' never mismatches
+    var cur = await ethProvider().request({ method: "eth_accounts" });
+    if (!cur || !cur[0]) { WEB3.account = null; refreshWalletUI(); WEB3.busy = false; return; }
+    if (cur[0].toLowerCase() !== WEB3.account.toLowerCase()) {
+      WEB3.account = cur[0];
+      loadBalance();
+    }
     var amount = BigInt(WEB3.costWhole) * (BigInt(10) ** BigInt(WEB3.decimals));
     var data = "0xa9059cbb" + padAddr(WEB3.burnAddr) + amount.toString(16).padStart(64, "0");
     var tx = await ethProvider().request({
@@ -1802,6 +1836,7 @@ refreshWalletUI();
   if (!eth) return;
   eth.request({ method: "eth_accounts" }).then(function (accs) {
     if (accs && accs[0]) { WEB3.account = accs[0]; loadToken(); }
+    attachWalletListeners();
   }).catch(function () { });
 })();
 document.addEventListener("visibilitychange", function () { lastTime = performance.now(); });
