@@ -133,7 +133,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ver" style="position:fixed;right:10px;bottom:8px;z-index:50;font-size:11px;font-weight:800;
-  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v13</div>
+  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v14</div>
 <div class="warnflash" id="warn"></div>
 
 <div class="hud" id="hud" style="display:none">
@@ -1731,8 +1731,10 @@ document.getElementById("switchWalletLink").onclick = function (e) { e.preventDe
 document.getElementById("prevChar").onclick = function () { cycleChar(-1); };
 document.getElementById("nextChar").onclick = function () { cycleChar(1); };
 /* ---- local leaderboard (per device/browser) --------------------------- */
-function lbLoad() { try { return JSON.parse(localStorage.getItem("unicat_lb") || "[]"); } catch (e) { return []; } }
-function lbSave(l) { try { localStorage.setItem("unicat_lb", JSON.stringify(l)); } catch (e) { } }
+var LB_KEY = "unicat_lb_s1";   // bump this suffix to reset every player's board (new season)
+try { localStorage.removeItem("unicat_lb"); } catch (e) { }   // wipe the pre-season board
+function lbLoad() { try { return JSON.parse(localStorage.getItem(LB_KEY) || "[]"); } catch (e) { return []; } }
+function lbSave(l) { try { localStorage.setItem(LB_KEY, JSON.stringify(l)); } catch (e) { } }
 function lbAdd(sc, cn) {
   if (sc <= 0) return;
   var l = lbLoad();
