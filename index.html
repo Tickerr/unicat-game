@@ -133,7 +133,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ver" style="position:fixed;right:10px;bottom:8px;z-index:50;font-size:11px;font-weight:800;
-  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v14</div>
+  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v15</div>
 <div class="warnflash" id="warn"></div>
 
 <div class="hud" id="hud" style="display:none">
@@ -211,7 +211,7 @@
 <div class="overlay hidden" id="lbScreen">
   <div class="card">
     <h1 class="title" style="font-size:clamp(28px,7vw,42px)">LEADERBOARD</h1>
-    <div class="sub">best runs on this device</div>
+    <div class="sub">global top 10 — all players</div>
     <div class="prize">🏆 Top score by <b>Aug 9, 2026</b> wins <b>a % of supply</b></div>
     <div id="lbList" style="text-align:left;max-height:300px;overflow:auto"></div>
     <button class="btn" id="lbClose" style="margin-top:14px">CLOSE</button>
@@ -1139,8 +1139,18 @@ function die(reason) {
   lbAdd(score, coins);
   if (lbBest() > best) best = lbBest();
   if (score > best) best = score;
-  document.getElementById("overLb").innerHTML =
-    "<div class='sub' style='margin:4px 0 6px;text-align:center'>Leaderboard</div>" + lbHtml(5, score);
+  submitScore(score, coins);
+  var overLb = document.getElementById("overLb");
+  overLb.innerHTML = "<div class='sub' style='margin:4px 0 6px;text-align:center'>Global Leaderboard</div>" +
+    "<div style='opacity:.6;text-align:center;font-weight:700;padding:10px 0'>Loading…</div>";
+  var myTx = WEB3.lastTx;
+  setTimeout(function () {          // brief delay so our own submit is included
+    fetchGlobal(5).then(function (list) {
+      overLb.innerHTML = "<div class='sub' style='margin:4px 0 6px;text-align:center'>Global Leaderboard</div>" + lbHtmlGlobal(list, myTx);
+    }).catch(function () {
+      overLb.innerHTML = "<div class='sub' style='margin:4px 0 6px;text-align:center'>Leaderboard (this device)</div>" + lbHtml(5, score);
+    });
+  }, 900);
   var titles = { splash: "SPLOOSH!", car: "SPLAT!", train: "CLANG!", hawk: "SNATCHED!" };
   var subs = {
     splash: "you sank like a brick",
@@ -1482,8 +1492,8 @@ function showTitle() {
   player.group.scale.set(1, 1, 1);
   document.getElementById("titleScreen").classList.remove("hidden");
   document.getElementById("overScreen").classList.add("hidden");
-  // leaderboard button only appears once there's something on the board
-  document.getElementById("lbBtn").parentElement.style.display = lbLoad().length ? "" : "none";
+  // global board — always show the leaderboard button
+  document.getElementById("lbBtn").parentElement.style.display = "";
   document.getElementById("hud").style.display = "none";
   document.getElementById("warn").style.boxShadow = "none";
   refreshCharLabel();
@@ -1731,6 +1741,46 @@ document.getElementById("switchWalletLink").onclick = function (e) { e.preventDe
 document.getElementById("prevChar").onclick = function () { cycleChar(-1); };
 document.getElementById("nextChar").onclick = function () { cycleChar(1); };
 /* ---- local leaderboard (per device/browser) --------------------------- */
+/* ---- global leaderboard (Supabase, insert-only) ----------------------- */
+var SUPA = {
+  url: "https://enixlnufexqblnpjchgt.supabase.co",
+  key: "sb_publishable_Hb7T9hifcwjSqDHW27k8Xg_5YkA0g_P"  // publishable key — safe to embed
+};
+function supaHeaders() {
+  return { "apikey": SUPA.key, "Authorization": "Bearer " + SUPA.key, "Content-Type": "application/json" };
+}
+function submitScore(sc, cn) {
+  // one entry per burn tx — the database rejects duplicates and fake formats
+  if (!(sc > 0) || !WEB3.account || !WEB3.lastTx) return;
+  try {
+    fetch(SUPA.url + "/rest/v1/scores", {
+      method: "POST",
+      headers: Object.assign(supaHeaders(), { "Prefer": "return=minimal" }),
+      body: JSON.stringify({ addr: WEB3.account.toLowerCase(), score: sc, coins: cn, tx: WEB3.lastTx })
+    }).catch(function () { });
+  } catch (e) { }
+}
+function fetchGlobal(limit) {
+  return fetch(SUPA.url + "/rest/v1/scores?select=addr,score,coins,tx,created_at&order=score.desc&limit=" + (limit || 10),
+    { headers: supaHeaders() }).then(function (r) {
+      if (!r.ok) throw new Error("lb " + r.status);
+      return r.json();
+    });
+}
+function lbHtmlGlobal(list, highlightTx) {
+  if (!list.length) return "<div style='opacity:.6;text-align:center;padding:18px 0;font-weight:700'>No scores yet — be the first!</div>";
+  var html = "";
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    var isNew = highlightTx && e.tx === highlightTx;
+    html += "<div class='lbrow'" + (isNew ? " style='background:rgba(252,114,255,.22);outline:1px solid rgba(252,114,255,.5)'" : "") + ">" +
+      "<span class='r'>" + (i + 1) + "</span>" +
+      "<span class='who'>" + shortAddr(e.addr) + (isNew ? " ← you" : "") + "</span>" +
+      "<span class='when'>" + (e.created_at || "").slice(0, 10) + "</span><b>" + e.score + "</b></div>";
+  }
+  return html;
+}
+
 var LB_KEY = "unicat_lb_s1";   // bump this suffix to reset every player's board (new season)
 try { localStorage.removeItem("unicat_lb"); } catch (e) { }   // wipe the pre-season board
 function lbLoad() { try { return JSON.parse(localStorage.getItem(LB_KEY) || "[]"); } catch (e) { return []; } }
@@ -1759,7 +1809,13 @@ function lbHtml(limit, highlightScore) {
 }
 function lbRender() { document.getElementById("lbList").innerHTML = lbHtml(10, null); }
 
-document.getElementById("lbBtn").onclick = function () { lbRender(); document.getElementById("lbScreen").classList.remove("hidden"); };
+document.getElementById("lbBtn").onclick = function () {
+  var el = document.getElementById("lbList");
+  el.innerHTML = "<div style='opacity:.6;text-align:center;padding:18px 0;font-weight:700'>Loading…</div>";
+  document.getElementById("lbScreen").classList.remove("hidden");
+  fetchGlobal(10).then(function (list) { el.innerHTML = lbHtmlGlobal(list, null); })
+    .catch(function () { lbRender(); });
+};
 document.getElementById("lbClose").onclick = function () { document.getElementById("lbScreen").classList.add("hidden"); };
 
 /* =========================================================================
