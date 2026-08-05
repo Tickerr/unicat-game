@@ -484,7 +484,7 @@ var COLS = 8;               // playable columns -8..8
 var TRACK = 1500;           // wrap length for moving lane objects
 var HALFTRACK = TRACK / 2;
 var LANE_W = 1700;
-var AHEAD = 20, BEHIND = 9;
+var AHEAD = 20, BEHIND = 13;
 
 var COL = {
   grass1: 0x86d26a, grass2: 0x79c65e,
@@ -524,6 +524,14 @@ scene.add(sun); scene.add(sun.target);
 
 var world = new THREE.Group();
 scene.add(world);
+
+// giant ground plane under everything — hides the void where rows aren't generated
+var backdrop = new THREE.Mesh(
+  new THREE.PlaneGeometry(7000, 7000),
+  new THREE.MeshLambertMaterial({ color: 0x74bd59 })
+);
+backdrop.position.z = -14;
+scene.add(backdrop);
 
 function resize() {
   var w = window.innerWidth, h = window.innerHeight;
@@ -616,6 +624,41 @@ var SFX = {
   whoosh: function () { swoosh({ dur: 0.35, lp: 600, lp2: 2800, vol: 0.12 }); },
   ding: function () { tone({ f: 880, dur: 0.12, type: "sine", vol: 0.06 }); }
 };
+
+/* ---- background jingle (generated, loops softly) ---------------------- */
+var NOTE = { C3:130.81, E3:164.81, F3:174.61, G3:196.00, A3:220.00,
+  C4:261.63, D4:293.66, E4:329.63, G4:392.00, A4:440.00,
+  C5:523.25, D5:587.33, E5:659.25, G5:783.99, A5:880.00, C6:1046.50 };
+// 4-bar loop in C-major pentatonic: C — Am — F — G
+var MEL = ["E5","","G5","","C6","","A5","G5", "E5","","G5","A5","G5","","E5","",
+           "D5","","E5","","G5","","A5","G5", "E5","","C5","D5","C5","","",""];
+var BASSLINE = ["C3","G3","A3","E3","F3","C3","G3","G3"];
+var MUSIC = { playing: false, timer: null, nextTime: 0, step: 0 };
+function musicTick() {
+  var a = actx; if (!a || !MUSIC.playing) return;
+  var eighth = 60 / 112 / 2;
+  while (MUSIC.nextTime < a.currentTime + 0.45) {
+    var d = Math.max(0, MUSIC.nextTime - a.currentTime);
+    var i = MUSIC.step % 32;
+    var m = MEL[i];
+    if (m) tone({ f: NOTE[m], dur: eighth * 0.92, type: "triangle", vol: 0.032, delay: d, a: 0.02 });
+    if (i % 4 === 0) {
+      var b = BASSLINE[((MUSIC.step / 4) | 0) % 8];
+      tone({ f: NOTE[b], dur: eighth * 3.6, type: "sine", vol: 0.045, delay: d, a: 0.03 });
+    }
+    MUSIC.step++; MUSIC.nextTime += eighth;
+  }
+}
+function startMusic() {
+  if (!audio() || MUSIC.playing) return;
+  MUSIC.playing = true; MUSIC.step = 0;
+  MUSIC.nextTime = actx.currentTime + 0.15;
+  MUSIC.timer = setInterval(musicTick, 150);
+}
+function stopMusic() {
+  MUSIC.playing = false;
+  if (MUSIC.timer) { clearInterval(MUSIC.timer); MUSIC.timer = null; }
+}
 
 /* =========================================================================
    5. LANE GENERATION
@@ -853,11 +896,12 @@ function setFigure(spec) {
 }
 
 var state = "title";     // title | playing | dead
-var score = 0, best = 0, coins = 0, floorRow = -6, queued = null, deathReason = "";
+var COIN_BONUS = 5;      // each token collected is worth this many points
+var score = 0, best = 0, coins = 0, maxRow = 0, floorRow = -6, queued = null, deathReason = "";
 
 function resetGame() {
   clearWorld();
-  score = 0; coins = 0; floorRow = -6; queued = null;
+  score = 0; coins = 0; maxRow = 0; floorRow = -6; queued = null;
   player.row = 0; player.x = 0; player.hopping = false; player.ridingLog = null;
   player.facing = 0; player.faceTarget = 0; player.alive = true;
   player.group.position.set(0, 0, 0);
@@ -934,9 +978,11 @@ function land() {
   }
 
   if (r.coin && !r.coin.taken && Math.round(player.x / T) === r.coin.col) {
-    r.coin.taken = true; r.coin.mesh.visible = false; coins++; SFX.coin(); updateHud();
+    r.coin.taken = true; r.coin.mesh.visible = false; coins++; SFX.coin();
   }
-  if (player.row > score) { score = player.row; updateHud(); }
+  if (player.row > maxRow) maxRow = player.row;
+  score = maxRow + coins * COIN_BONUS;   // tokens are worth bonus points
+  updateHud();
 
   // extend/trim world
   for (var k = player.row - BEHIND; k <= player.row + AHEAD; k++) if (!rows[k]) generateRow(k);
@@ -1013,6 +1059,7 @@ function die(reason) {
   player.alive = false;
   state = "dead";
   deathReason = reason;
+  stopMusic();
   var px = player.group.position.x, py = player.group.position.y;
   if (reason === "splash") {
     SFX.splash();
@@ -1231,6 +1278,8 @@ function updateCamera(dt) {
   var focus = new THREE.Vector3(camX, camSmooth * T, 0);
   camera.position.copy(focus).add(CAM_OFF);
   camera.lookAt(focus);
+  backdrop.position.x = focus.x;
+  backdrop.position.y = focus.y;
   sun.position.copy(focus).add(new THREE.Vector3(-260, -220, 520));
   sun.target.position.copy(focus);
   sun.target.updateMatrixWorld();
@@ -1361,6 +1410,7 @@ function startGame() {
   setFigure(roster[selectedChar]);
   resetGame();
   state = "playing";
+  startMusic();
 }
 /* =========================================================================
    9b. PAY-TO-PLAY — wallet connect + burn 1,000 tokens per run
