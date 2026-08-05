@@ -120,7 +120,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ver" style="position:fixed;right:10px;bottom:8px;z-index:50;font-size:11px;font-weight:800;
-  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v8</div>
+  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v9</div>
 <div class="warnflash" id="warn"></div>
 
 <div class="hud" id="hud" style="display:none">
@@ -657,10 +657,10 @@ function musicTick() {
     MUSIC.step++; MUSIC.nextTime += eighth;
   }
 }
-/* ---- train rumble (fades in while a train is near) -------------------- */
+/* ---- train rumble: volume tracks train proximity, eases in AND out ---- */
 var rumble = null;
-function startRumble() {
-  if (rumble || !audio()) return;
+function ensureRumble() {
+  if (rumble || !audio() || document.hidden) return;
   var a = actx;
   var n = a.sampleRate;
   var buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
@@ -668,16 +668,24 @@ function startRumble() {
   var s = a.createBufferSource(); s.buffer = buf; s.loop = true;
   var f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 420;
   var g = a.createGain(); g.gain.setValueAtTime(0.0001, a.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.1, a.currentTime + 0.35);
   s.connect(f); f.connect(g); g.connect(master || a.destination);
   s.start();
   rumble = { s: s, g: g };
 }
+function setRumbleLevel(target) {
+  if (!actx) return;
+  if (target > 0.002 && !rumble) ensureRumble();
+  if (!rumble) return;
+  // setTargetAtTime = smooth exponential glide toward the target — no hard steps
+  rumble.g.gain.setTargetAtTime(Math.max(0.0001, target), actx.currentTime, 0.55);
+}
 function stopRumble() {
   if (!rumble || !actx) return;
   var r = rumble; rumble = null;
-  r.g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.4);
-  setTimeout(function () { try { r.s.stop(); } catch (e) { } }, 600);
+  try {
+    r.g.gain.setTargetAtTime(0.0001, actx.currentTime, 0.4);
+    setTimeout(function () { try { r.s.stop(); } catch (e) { } }, 2000);
+  } catch (e) { }
 }
 
 function startMusic() {
@@ -747,7 +755,8 @@ function makeTruck() {
   var cab = box(34, 30, 26, 0xff5a5a); cab.position.set(34, 0, 17); cab.castShadow = true; g.add(cab);
   var win = box(10, 26, 10, 0xdff1ff); win.position.set(20, 0, 26); g.add(win);
   var tr = box(72, 32, 34, 0xeef2f8); tr.position.set(-22, 0, 21); tr.castShadow = true; g.add(tr);
-  var base = box(105, 30, 8, 0x4a5266); base.position.z = 6; g.add(base);
+  // chassis stops just short of the cab so their faces never overlap (was z-fighting at the front wheel)
+  var base = box(87, 28, 8, 0x4a5266); base.position.set(-27.5, 0, 6); g.add(base);
   for (var i = -1; i <= 1; i++) { var w = box(14, 34, 8, 0x171a22); w.position.set(i * 34, 0, 5); g.add(w); }
   g.userData.len = 108;
   return g;
@@ -831,7 +840,7 @@ function generateRow(i) {
     }
     row.dir = Math.random() < 0.5 ? 1 : -1;
     row.speed = rnd(62, 118) * difficulty(i);
-    var nv = irnd(2, 4);
+    var nv = irnd(2, 4) + (i > 120 ? 1 : 0);   // denser traffic deep into a run
     var gap = TRACK / nv;
     for (var v = 0; v < nv; v++) {
       var truck = Math.random() < 0.28;
@@ -1141,7 +1150,7 @@ function die(reason) {
 var camRow = 0, camSmooth = 0, camX = 0, waterT = 0;
 
 function updateRows(dt) {
-  var trainNear = false;
+  var rumbleLevel = 0;
   for (var key in rows) {
     var r = rows[key];
     if (r.type === "road") {
@@ -1174,7 +1183,13 @@ function updateRows(dt) {
     } else if (r.type === "rail") {
       r.timer -= dt;
       if (r.train) {
-        if (state === "playing" && Math.abs(r.i - player.row) <= 3) trainNear = true;
+        if (state === "playing") {
+          // rumble loudness follows how close the train actually is
+          var rowF = Math.max(0, 1 - Math.abs(r.i - player.row) / 5);
+          var xF = Math.max(0, Math.min(1, 1.15 - Math.abs(r.train.x - player.x) / 900));
+          var lvl = 0.13 * rowF * (0.3 + 0.7 * xF);
+          if (lvl > rumbleLevel) rumbleLevel = lvl;
+        }
         r.train.x += r.dir * r.speed * dt;
         r.train.mesh.position.x = r.train.x;
         if (Math.abs(r.train.x) > HALFTRACK + r.train.len) {
@@ -1202,7 +1217,7 @@ function updateRows(dt) {
       }
     }
   }
-  if (trainNear) startRumble(); else stopRumble();
+  if (state === "playing") setRumbleLevel(rumbleLevel);
 }
 
 function updatePlayer(dt) {
