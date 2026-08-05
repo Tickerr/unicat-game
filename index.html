@@ -173,7 +173,7 @@
         <div style="font-size:34px;font-weight:900" id="finalCoins">0</div>
       </div>
     </div>
-    <div class="prize" style="margin-bottom:10px">🏆 Top score by <b>Aug 9, 2026</b> wins <b>a % of supply</b> — screenshot your run!</div>
+    <div class="prize" style="margin-bottom:10px">🏆 Top score by <b>Aug 9, 2026</b> wins <b>a % of supply</b></div>
     <div id="overLb" style="text-align:left;margin-bottom:12px;max-height:220px;overflow:auto"></div>
     <div class="walletline" id="burnLine" style="display:none"></div>
     <button class="btn" id="againBtn">PLAY AGAIN</button>
@@ -649,6 +649,29 @@ function musicTick() {
     MUSIC.step++; MUSIC.nextTime += eighth;
   }
 }
+/* ---- train rumble (fades in while a train is near) -------------------- */
+var rumble = null;
+function startRumble() {
+  if (rumble || !audio()) return;
+  var a = actx;
+  var n = a.sampleRate;
+  var buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
+  for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  var s = a.createBufferSource(); s.buffer = buf; s.loop = true;
+  var f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 140;
+  var g = a.createGain(); g.gain.setValueAtTime(0.0001, a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.07, a.currentTime + 0.35);
+  s.connect(f); f.connect(g); g.connect(master || a.destination);
+  s.start();
+  rumble = { s: s, g: g };
+}
+function stopRumble() {
+  if (!rumble || !actx) return;
+  var r = rumble; rumble = null;
+  r.g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.4);
+  setTimeout(function () { try { r.s.stop(); } catch (e) { } }, 600);
+}
+
 function startMusic() {
   if (!audio() || MUSIC.playing) return;
   MUSIC.playing = true; MUSIC.step = 0;
@@ -1060,6 +1083,7 @@ function die(reason) {
   state = "dead";
   deathReason = reason;
   stopMusic();
+  stopRumble();
   var px = player.group.position.x, py = player.group.position.y;
   if (reason === "splash") {
     SFX.splash();
@@ -1109,15 +1133,27 @@ function die(reason) {
 var camRow = 0, camSmooth = 0, camX = 0, waterT = 0;
 
 function updateRows(dt) {
+  var trainNear = false;
   for (var key in rows) {
     var r = rows[key];
     if (r.type === "road") {
+      var nearRoad = state === "playing" && Math.abs(r.i - player.row) <= 1;
       for (var i = 0; i < r.obstacles.length; i++) {
         var o = r.obstacles[i];
         o.x += r.dir * r.speed * dt;
         if (o.x > HALFTRACK) o.x -= TRACK;
         if (o.x < -HALFTRACK) o.x += TRACK;
         o.mesh.position.x = o.x;
+        // soft whoosh when a vehicle passes the player on a nearby lane
+        if (nearRoad) {
+          var dx = o.x - player.x;
+          if (o.prevDx !== undefined && Math.abs(dx) < 120 &&
+              ((o.prevDx < 0) !== (dx < 0))) {
+            swoosh({ dur: 0.22, lp: 1500, lp2: 350,
+              vol: r.i === player.row ? 0.055 : 0.03 });
+          }
+          o.prevDx = dx;
+        } else o.prevDx = undefined;
       }
     } else if (r.type === "river") {
       for (var j = 0; j < r.logs.length; j++) {
@@ -1130,6 +1166,7 @@ function updateRows(dt) {
     } else if (r.type === "rail") {
       r.timer -= dt;
       if (r.train) {
+        if (state === "playing" && Math.abs(r.i - player.row) <= 3) trainNear = true;
         r.train.x += r.dir * r.speed * dt;
         r.train.mesh.position.x = r.train.x;
         if (Math.abs(r.train.x) > HALFTRACK + r.train.len) {
@@ -1149,11 +1186,13 @@ function updateRows(dt) {
           r.warn = 0;
           r.lights[0].material.color.setHex(0x552222);
           r.lights[1].material.color.setHex(0x552222);
-          if (Math.abs(r.i - player.row) < 8) SFX.horn();
+          // horn only during play, and only when the train is actually close
+          if (state === "playing" && Math.abs(r.i - player.row) < 5) SFX.horn();
         }
       }
     }
   }
+  if (trainNear) startRumble(); else stopRumble();
 }
 
 function updatePlayer(dt) {
