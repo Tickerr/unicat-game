@@ -565,6 +565,7 @@ function audio() {
   return actx;
 }
 function tone(o) {
+  if (document.hidden) return;   // never make noise from a background tab
   var a = audio(); if (!a) return;
   var t0 = a.currentTime + (o.delay || 0);
   var osc = a.createOscillator(), g = a.createGain();
@@ -583,6 +584,7 @@ function tone(o) {
   osc.start(t0); osc.stop(t0 + o.dur + 0.05);
 }
 function swoosh(o) {
+  if (document.hidden) return;   // never make noise from a background tab
   var a = audio(); if (!a) return;
   var t0 = a.currentTime + (o.delay || 0);
   var n = Math.floor(a.sampleRate * o.dur);
@@ -618,8 +620,12 @@ var SFX = {
     tone({ f: 420, f2: 140, dur: 0.2, type: "sawtooth", vol: 0.06 });
   },
   horn: function () {
-    tone({ f: 293.7, dur: 0.4, type: "sawtooth", vol: 0.05, lp: 1200 });
-    tone({ f: 370, dur: 0.4, type: "sawtooth", vol: 0.05, lp: 1200 });
+    tone({ f: 293.7, dur: 0.32, type: "sawtooth", vol: 0.04, lp: 1100 });
+    tone({ f: 370, dur: 0.32, type: "sawtooth", vol: 0.04, lp: 1100 });
+  },
+  bell: function () {
+    tone({ f: 1180, dur: 0.09, type: "square", vol: 0.022 });
+    tone({ f: 1560, dur: 0.06, type: "sine", vol: 0.014 });
   },
   whoosh: function () { swoosh({ dur: 0.35, lp: 600, lp2: 2800, vol: 0.12 }); },
   ding: function () { tone({ f: 880, dur: 0.12, type: "sine", vol: 0.06 }); }
@@ -658,9 +664,9 @@ function startRumble() {
   var buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
   for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
   var s = a.createBufferSource(); s.buffer = buf; s.loop = true;
-  var f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 140;
+  var f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 420;
   var g = a.createGain(); g.gain.setValueAtTime(0.0001, a.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.07, a.currentTime + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.1, a.currentTime + 0.35);
   s.connect(f); f.connect(g); g.connect(master || a.destination);
   s.start();
   rumble = { s: s, g: g };
@@ -1149,8 +1155,8 @@ function updateRows(dt) {
           var dx = o.x - player.x;
           if (o.prevDx !== undefined && Math.abs(dx) < 120 &&
               ((o.prevDx < 0) !== (dx < 0))) {
-            swoosh({ dur: 0.22, lp: 1500, lp2: 350,
-              vol: r.i === player.row ? 0.055 : 0.03 });
+            swoosh({ dur: 0.25, lp: 1900, lp2: 350,
+              vol: r.i === player.row ? 0.1 : 0.055 });
           }
           o.prevDx = dx;
         } else o.prevDx = undefined;
@@ -1176,6 +1182,9 @@ function updateRows(dt) {
       } else if (r.timer < 1.3) {
         r.warn += dt;
         var on = (Math.floor(r.warn * 6) % 2) === 0;
+        // railroad crossing bell while the lights blink near the player
+        if (on && !r.wasOn && state === "playing" && Math.abs(r.i - player.row) <= 4) SFX.bell();
+        r.wasOn = on;
         r.lights[0].material.color.setHex(on ? 0xff3b3b : 0x552222);
         r.lights[1].material.color.setHex(on ? 0xff3b3b : 0x552222);
         if (r.timer <= 0) {
@@ -1186,8 +1195,7 @@ function updateRows(dt) {
           r.warn = 0;
           r.lights[0].material.color.setHex(0x552222);
           r.lights[1].material.color.setHex(0x552222);
-          // horn only during play, and only when the train is actually close
-          if (state === "playing" && Math.abs(r.i - player.row) < 5) SFX.horn();
+          // no horn — the crossing bell + rumble announce the train
         }
       }
     }
