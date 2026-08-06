@@ -133,7 +133,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ver" style="position:fixed;right:10px;bottom:8px;z-index:50;font-size:11px;font-weight:800;
-  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v17</div>
+  opacity:.55;letter-spacing:.08em;text-shadow:0 1px 2px rgba(0,0,0,.5)">v18</div>
 <div class="warnflash" id="warn"></div>
 
 <div class="hud" id="hud" style="display:none">
@@ -506,7 +506,8 @@ var T = 42;                 // tile size
 var COLS = 8;               // playable columns -8..8
 var TRACK = 1500;           // wrap length for moving lane objects
 var HALFTRACK = TRACK / 2;
-var LANE_W = 1700;
+var LANE_W = 2800;          // lanes run far past the screen edge on any aspect ratio
+var DECOR_TILES = 30;       // road dashes / rail ties extend this many tiles each side
 var AHEAD = 20, BEHIND = 13;
 
 var COL = {
@@ -854,7 +855,7 @@ function generateRow(i) {
     g.add(slab(COL.road, 12, -6));
     var prev = rows[i - 1];
     if (prev && prev.type === "road") {
-      for (var d = -COLS - 1; d <= COLS + 1; d++) {
+      for (var d = -DECOR_TILES; d <= DECOR_TILES; d++) {
         var dash = box(24, 3, 1, 0xf2f2f2);
         dash.position.set(d * T, -T / 2, 0.6); g.add(dash);
       }
@@ -886,7 +887,7 @@ function generateRow(i) {
     }
   } else { // rail
     g.add(slab(COL.rail, 12, -6));
-    for (var s = -COLS - 2; s <= COLS + 2; s++) {
+    for (var s = -DECOR_TILES; s <= DECOR_TILES; s++) {
       var tie = box(26, 34, 4, COL.tie); tie.position.set(s * T, 0, 1); g.add(tie);
     }
     var r1 = box(LANE_W, 5, 6, COL.steel); r1.position.set(0, -11, 4); g.add(r1);
